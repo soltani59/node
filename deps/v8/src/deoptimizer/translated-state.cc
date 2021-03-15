@@ -98,6 +98,7 @@ void TranslationArrayPrintSingleFrame(std::ostream& os,
         break;
       }
 
+#if V8_ENABLE_WEBASSEMBLY
       case TranslationOpcode::JS_TO_WASM_BUILTIN_CONTINUATION_FRAME: {
         DCHECK_EQ(TranslationOpcodeOperandCount(opcode), 4);
         int bailout_id = iterator.Next();
@@ -111,6 +112,7 @@ void TranslationArrayPrintSingleFrame(std::ostream& os,
            << "}";
         break;
       }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
       case TranslationOpcode::ARGUMENTS_ADAPTOR_FRAME: {
         DCHECK_EQ(TranslationOpcodeOperandCount(opcode), 2);
@@ -264,19 +266,6 @@ void TranslationArrayPrintSingleFrame(std::ostream& os,
     os << "\n";
   }
 }
-
-namespace {
-
-// Decodes the return type of a Wasm function as the integer value of
-// wasm::ValueKind, or kNoWasmReturnType if the function returns void.
-base::Optional<wasm::ValueKind> DecodeWasmReturnType(int code) {
-  if (code != kNoWasmReturnType) {
-    return {static_cast<wasm::ValueKind>(code)};
-  }
-  return {};
-}
-
-}  // namespace
 
 // static
 TranslatedValue TranslatedValue::NewDeferredObject(TranslatedState* container,
@@ -656,14 +645,16 @@ TranslatedFrame TranslatedFrame::BuiltinContinuationFrame(
   return frame;
 }
 
+#if V8_ENABLE_WEBASSEMBLY
 TranslatedFrame TranslatedFrame::JSToWasmBuiltinContinuationFrame(
     BytecodeOffset bytecode_offset, SharedFunctionInfo shared_info, int height,
-    base::Optional<wasm::ValueKind> return_type) {
+    base::Optional<wasm::ValueKind> return_kind) {
   TranslatedFrame frame(kJSToWasmBuiltinContinuation, shared_info, height);
   frame.bytecode_offset_ = bytecode_offset;
-  frame.return_type_ = return_type;
+  frame.return_kind_ = return_kind;
   return frame;
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 TranslatedFrame TranslatedFrame::JavaScriptBuiltinContinuationFrame(
     BytecodeOffset bytecode_offset, SharedFunctionInfo shared_info,
@@ -711,7 +702,9 @@ int TranslatedFrame::GetValueCount() {
 
     case kConstructStub:
     case kBuiltinContinuation:
+#if V8_ENABLE_WEBASSEMBLY
     case kJSToWasmBuiltinContinuation:
+#endif  // V8_ENABLE_WEBASSEMBLY
     case kJavaScriptBuiltinContinuation:
     case kJavaScriptBuiltinContinuationWithCatch: {
       static constexpr int kTheContext = 1;
@@ -805,13 +798,17 @@ TranslatedFrame TranslatedState::CreateNextTranslatedFrame(
                                                        shared_info, height);
     }
 
+#if V8_ENABLE_WEBASSEMBLY
     case TranslationOpcode::JS_TO_WASM_BUILTIN_CONTINUATION_FRAME: {
       BytecodeOffset bailout_id = BytecodeOffset(iterator->Next());
       SharedFunctionInfo shared_info =
           SharedFunctionInfo::cast(literal_array.get(iterator->Next()));
       int height = iterator->Next();
-      base::Optional<wasm::ValueKind> return_type =
-          DecodeWasmReturnType(iterator->Next());
+      int return_kind_code = iterator->Next();
+      base::Optional<wasm::ValueKind> return_kind;
+      if (return_kind_code != kNoWasmReturnKind) {
+        return_kind = static_cast<wasm::ValueKind>(return_kind_code);
+      }
       if (trace_file != nullptr) {
         std::unique_ptr<char[]> name = shared_info.DebugNameCStr();
         PrintF(trace_file, "  reading JS to Wasm builtin continuation frame %s",
@@ -819,11 +816,12 @@ TranslatedFrame TranslatedState::CreateNextTranslatedFrame(
         PrintF(trace_file,
                " => bailout_id=%d, height=%d return_type=%d; inputs:\n",
                bailout_id.ToInt(), height,
-               return_type.has_value() ? return_type.value() : -1);
+               return_kind.has_value() ? return_kind.value() : -1);
       }
       return TranslatedFrame::JSToWasmBuiltinContinuationFrame(
-          bailout_id, shared_info, height, return_type);
+          bailout_id, shared_info, height, return_kind);
     }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
     case TranslationOpcode::JAVA_SCRIPT_BUILTIN_CONTINUATION_FRAME: {
       BytecodeOffset bytecode_offset = BytecodeOffset(iterator->Next());
@@ -980,7 +978,9 @@ int TranslatedState::CreateNextTranslatedValue(
     case TranslationOpcode::JAVA_SCRIPT_BUILTIN_CONTINUATION_FRAME:
     case TranslationOpcode::JAVA_SCRIPT_BUILTIN_CONTINUATION_WITH_CATCH_FRAME:
     case TranslationOpcode::BUILTIN_CONTINUATION_FRAME:
+#if V8_ENABLE_WEBASSEMBLY
     case TranslationOpcode::JS_TO_WASM_BUILTIN_CONTINUATION_FRAME:
+#endif  // V8_ENABLE_WEBASSEMBLY
     case TranslationOpcode::UPDATE_FEEDBACK:
       // Peeled off before getting here.
       break;
@@ -1282,7 +1282,8 @@ Address TranslatedState::DecompressIfNeeded(intptr_t value) {
   }
 }
 
-TranslatedState::TranslatedState(const JavaScriptFrame* frame) {
+TranslatedState::TranslatedState(const JavaScriptFrame* frame)
+    : purpose_(kFrameInspection) {
   int deopt_index = Safepoint::kNoDeoptimizationIndex;
   DeoptimizationData data =
       static_cast<const OptimizedFrame*>(frame)->GetDeoptimizationData(
@@ -1672,23 +1673,61 @@ void TranslatedState::EnsureCapturedObjectAllocatedAt(
     }
 
     default:
-      CHECK(map->IsJSObjectMap());
       EnsureJSObjectAllocated(slot, map);
-      TranslatedValue* properties_slot = &(frame->values_[value_index]);
-      value_index++;
+      int remaining_children_count = slot->GetChildrenCount() - 1;
+
+      TranslatedValue* properties_slot = frame->ValueAt(value_index);
+      value_index++, remaining_children_count--;
       if (properties_slot->kind() == TranslatedValue::kCapturedObject) {
-        // If we are materializing the property array, make sure we put
-        // the mutable heap numbers at the right places.
+        // We are materializing the property array, so make sure we put the
+        // mutable heap numbers at the right places.
         EnsurePropertiesAllocatedAndMarked(properties_slot, map);
         EnsureChildrenAllocated(properties_slot->GetChildrenCount(), frame,
                                 &value_index, worklist);
+      } else {
+        CHECK_EQ(properties_slot->kind(), TranslatedValue::kTagged);
       }
-      // Make sure all the remaining children (after the map and properties) are
-      // allocated.
-      return EnsureChildrenAllocated(slot->GetChildrenCount() - 2, frame,
+
+      TranslatedValue* elements_slot = frame->ValueAt(value_index);
+      value_index++, remaining_children_count--;
+      if (elements_slot->kind() == TranslatedValue::kCapturedObject ||
+          !map->IsJSArrayMap()) {
+        // Handle this case with the other remaining children below.
+        value_index--, remaining_children_count++;
+      } else {
+        CHECK_EQ(elements_slot->kind(), TranslatedValue::kTagged);
+        elements_slot->GetValue();
+        if (purpose_ == kFrameInspection) {
+          // We are materializing a JSArray for the purpose of frame inspection.
+          // If we were to construct it with the above elements value then an
+          // actual deopt later on might create another JSArray instance with
+          // the same elements store. That would violate the key assumption
+          // behind left-trimming.
+          elements_slot->ReplaceElementsArrayWithCopy();
+        }
+      }
+
+      // Make sure all the remaining children (after the map, properties store,
+      // and possibly elements store) are allocated.
+      return EnsureChildrenAllocated(remaining_children_count, frame,
                                      &value_index, worklist);
   }
   UNREACHABLE();
+}
+
+void TranslatedValue::ReplaceElementsArrayWithCopy() {
+  DCHECK_EQ(kind(), TranslatedValue::kTagged);
+  DCHECK_EQ(materialization_state(), TranslatedValue::kFinished);
+  auto elements = Handle<FixedArrayBase>::cast(GetValue());
+  DCHECK(elements->IsFixedArray() || elements->IsFixedDoubleArray());
+  if (elements->IsFixedDoubleArray()) {
+    DCHECK(!elements->IsCowArray());
+    set_storage(isolate()->factory()->CopyFixedDoubleArray(
+        Handle<FixedDoubleArray>::cast(elements)));
+  } else if (!elements->IsCowArray()) {
+    set_storage(isolate()->factory()->CopyFixedArray(
+        Handle<FixedArray>::cast(elements)));
+  }
 }
 
 void TranslatedState::EnsureChildrenAllocated(int count, TranslatedFrame* frame,
@@ -1726,7 +1765,7 @@ void TranslatedState::EnsurePropertiesAllocatedAndMarked(
   properties_slot->set_storage(object_storage);
 
   // Set markers for out-of-object properties.
-  Handle<DescriptorArray> descriptors(map->instance_descriptors(kRelaxedLoad),
+  Handle<DescriptorArray> descriptors(map->instance_descriptors(isolate()),
                                       isolate());
   for (InternalIndex i : map->IterateOwnDescriptors()) {
     FieldIndex index = FieldIndex::ForDescriptor(*map, i);
@@ -1755,11 +1794,12 @@ Handle<ByteArray> TranslatedState::AllocateStorageFor(TranslatedValue* slot) {
 
 void TranslatedState::EnsureJSObjectAllocated(TranslatedValue* slot,
                                               Handle<Map> map) {
+  CHECK(map->IsJSObjectMap());
   CHECK_EQ(map->instance_size(), slot->GetChildrenCount() * kTaggedSize);
 
   Handle<ByteArray> object_storage = AllocateStorageFor(slot);
   // Now we handle the interesting (JSObject) case.
-  Handle<DescriptorArray> descriptors(map->instance_descriptors(kRelaxedLoad),
+  Handle<DescriptorArray> descriptors(map->instance_descriptors(isolate()),
                                       isolate());
 
   // Set markers for in-object properties.

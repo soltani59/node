@@ -1374,13 +1374,15 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   // authenticate the LR when pointer authentication is enabled.
   void RestoreFPAndLR();
 
+#if V8_ENABLE_WEBASSEMBLY
   void StoreReturnAddressInWasmExitFrame(Label* return_location);
+#endif  // V8_ENABLE_WEBASSEMBLY
 
   // Wasm SIMD helpers. These instructions don't have direct lowering to native
   // instructions. These helpers allow us to define the optimal code sequence,
   // and be used in both TurboFan and Liftoff.
   void I64x2BitMask(Register dst, VRegister src);
-  void V64x2AllTrue(Register dst, VRegister src);
+  void I64x2AllTrue(Register dst, VRegister src);
 
  protected:
   // The actual Push and Pop implementations. These don't generate any code
@@ -2032,7 +2034,7 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
   // ---------------------------------------------------------------------------
   // Debugging.
 
-  void LoadNativeContextSlot(int index, Register dst);
+  void LoadNativeContextSlot(Register dst, int index);
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(MacroAssembler);
 };

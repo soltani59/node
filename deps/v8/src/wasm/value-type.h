@@ -9,6 +9,7 @@
 #include "src/base/optional.h"
 #include "src/codegen/machine-type.h"
 #include "src/wasm/wasm-constants.h"
+#include "src/wasm/wasm-limits.h"
 
 namespace v8 {
 namespace internal {
@@ -179,12 +180,12 @@ enum ValueKind : uint8_t {
 #undef DEF_ENUM
 };
 
-constexpr bool is_reference_type(ValueKind kind) {
+constexpr bool is_reference(ValueKind kind) {
   return kind == kRef || kind == kOptRef || kind == kRtt ||
          kind == kRttWithDepth;
 }
 
-constexpr bool is_object_reference_type(ValueKind kind) {
+constexpr bool is_object_reference(ValueKind kind) {
   return kind == kRef || kind == kOptRef;
 }
 
@@ -305,12 +306,10 @@ class ValueType {
   }
 
   /******************************** Type checks *******************************/
-  constexpr bool is_reference_type() const {
-    return wasm::is_reference_type(kind());
-  }
+  constexpr bool is_reference() const { return wasm::is_reference(kind()); }
 
-  constexpr bool is_object_reference_type() const {
-    return wasm::is_object_reference_type(kind());
+  constexpr bool is_object_reference() const {
+    return wasm::is_object_reference(kind());
   }
 
   constexpr bool is_nullable() const { return kind() == kOptRef; }
@@ -324,7 +323,7 @@ class ValueType {
   constexpr bool has_depth() const { return kind() == kRttWithDepth; }
 
   constexpr bool has_index() const {
-    return is_rtt() || (is_object_reference_type() && heap_type().is_index());
+    return is_rtt() || (is_object_reference() && heap_type().is_index());
   }
 
   constexpr bool is_defaultable() const { return wasm::is_defaultable(kind()); }
@@ -340,12 +339,12 @@ class ValueType {
   /***************************** Field Accessors ******************************/
   constexpr ValueKind kind() const { return KindField::decode(bit_field_); }
   constexpr HeapType::Representation heap_representation() const {
-    CONSTEXPR_DCHECK(is_object_reference_type());
+    CONSTEXPR_DCHECK(is_object_reference());
     return static_cast<HeapType::Representation>(
         HeapTypeField::decode(bit_field_));
   }
   constexpr HeapType heap_type() const {
-    CONSTEXPR_DCHECK(is_object_reference_type());
+    CONSTEXPR_DCHECK(is_object_reference());
     return HeapType(heap_representation());
   }
   constexpr uint8_t depth() const {
@@ -357,7 +356,7 @@ class ValueType {
     return HeapTypeField::decode(bit_field_);
   }
   constexpr Nullability nullability() const {
-    CONSTEXPR_DCHECK(is_object_reference_type());
+    CONSTEXPR_DCHECK(is_object_reference());
     return kind() == kOptRef ? kNullable : kNonNullable;
   }
 
@@ -532,6 +531,8 @@ class ValueType {
 
 static_assert(sizeof(ValueType) <= kUInt32Size,
               "ValueType is small and can be passed by value");
+static_assert(ValueType::kLastUsedBit < 8 * sizeof(ValueType) - kSmiTagSize,
+              "ValueType has space to be encoded in a Smi");
 
 inline size_t hash_value(ValueType type) {
   return static_cast<size_t>(type.kind());
@@ -561,6 +562,10 @@ constexpr ValueType kWasmI31Ref = ValueType::Ref(HeapType::kI31, kNonNullable);
 constexpr ValueType kWasmDataRef =
     ValueType::Ref(HeapType::kData, kNonNullable);
 constexpr ValueType kWasmAnyRef = ValueType::Ref(HeapType::kAny, kNullable);
+
+// This is used in wasm.tq.
+constexpr ValueType kWasmExternNonNullableRef =
+    ValueType::Ref(HeapType::kExtern, kNonNullable);
 
 #define FOREACH_WASMVALUE_CTYPES(V) \
   V(kI32, int32_t)                  \

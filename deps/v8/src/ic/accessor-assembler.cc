@@ -24,9 +24,6 @@
 namespace v8 {
 namespace internal {
 
-using compiler::CodeAssemblerState;
-using compiler::Node;
-
 //////////////////// Private helpers.
 
 // Loads dataX field from the DataHandler object.
@@ -392,7 +389,7 @@ void AccessorAssembler::HandleLoadICSmiHandlerCase(
       if (Is64()) {
         GotoIfNot(
             UintPtrLessThanOrEqual(var_intptr_index.value(),
-                                   IntPtrConstant(JSArray::kMaxArrayIndex)),
+                                   IntPtrConstant(JSObject::kMaxElementIndex)),
             miss);
       } else {
         GotoIf(IntPtrLessThan(var_intptr_index.value(), IntPtrConstant(0)),
@@ -863,7 +860,7 @@ TNode<Object> AccessorAssembler::HandleProtoHandler(
       BIND(&if_lookup_on_lookup_start_object);
       {
         if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-          // TODO(v8:11167) remove once OrderedNameDictionary supported.
+          // TODO(v8:11167) remove once SwissNameDictionary supported.
           GotoIf(Int32TrueConstant(), miss);
         }
 
@@ -2137,7 +2134,7 @@ void AccessorAssembler::EmitElementLoad(
     {
       Comment("dictionary elements");
       if (Is64()) {
-        GotoIf(UintPtrLessThan(IntPtrConstant(JSArray::kMaxArrayIndex),
+        GotoIf(UintPtrLessThan(IntPtrConstant(JSObject::kMaxElementIndex),
                                intptr_index),
                out_of_bounds);
       } else {
@@ -2328,11 +2325,11 @@ void AccessorAssembler::GenericElementLoad(
     // without ever checking the prototype chain.
     GotoIf(IsJSTypedArrayInstanceType(lookup_start_object_instance_type),
            &return_undefined);
-    // Positive OOB indices within JSArray index range are effectively the same
+    // Positive OOB indices within elements index range are effectively the same
     // as hole loads. Larger keys and negative keys are named loads.
     if (Is64()) {
       Branch(UintPtrLessThanOrEqual(index,
-                                    IntPtrConstant(JSArray::kMaxArrayIndex)),
+                                    IntPtrConstant(JSObject::kMaxElementIndex)),
              &if_element_hole, slow);
     } else {
       Branch(IntPtrLessThan(index, IntPtrConstant(0)), slow, &if_element_hole);
@@ -2443,7 +2440,7 @@ void AccessorAssembler::GenericPropertyLoad(
   BIND(&if_property_dictionary);
   {
     if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-      // TODO(v8:11167) remove once OrderedNameDictionary supported.
+      // TODO(v8:11167) remove once SwissNameDictionary supported.
       GotoIf(Int32TrueConstant(), slow);
     }
 

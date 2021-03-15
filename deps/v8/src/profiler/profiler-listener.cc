@@ -19,7 +19,10 @@
 #include "src/profiler/cpu-profiler.h"
 #include "src/profiler/profile-generator-inl.h"
 #include "src/utils/vector.h"
+
+#if V8_ENABLE_WEBASSEMBLY
 #include "src/wasm/wasm-code-manager.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 namespace v8 {
 namespace internal {
@@ -116,13 +119,18 @@ void ProfilerListener::CodeCreateEvent(LogEventsAndTags tag,
 
     is_shared_cross_origin = script->origin_options().IsSharedCrossOrigin();
 
-    // TODO(v8:11429,cbruni): improve iteration for baseline code
     bool is_baseline = abstract_code->kind() == CodeKind::BASELINE;
     Handle<ByteArray> source_position_table(
-        abstract_code->source_position_table(), isolate_);
+        abstract_code->SourcePositionTable(*shared), isolate_);
+    std::unique_ptr<baseline::BytecodeOffsetIterator> baseline_iterator =
+        nullptr;
     if (is_baseline) {
-      source_position_table = handle(
-          shared->GetBytecodeArray(isolate_).SourcePositionTable(), isolate_);
+      Handle<BytecodeArray> bytecodes(shared->GetBytecodeArray(isolate_),
+                                      isolate_);
+      Handle<ByteArray> bytecode_offsets(
+          abstract_code->GetCode().bytecode_offset_table(), isolate_);
+      baseline_iterator = std::make_unique<baseline::BytecodeOffsetIterator>(
+          bytecode_offsets, bytecodes);
     }
     // Add each position to the source position table and store inlining stacks
     // for inline positions. We store almost the same information in the
@@ -136,10 +144,9 @@ void ProfilerListener::CodeCreateEvent(LogEventsAndTags tag,
       int code_offset = it.code_offset();
       if (is_baseline) {
         // Use the bytecode offset to calculate pc offset for baseline code.
-        // TODO(v8:11429,cbruni): Speed this up.
-        code_offset = static_cast<int>(
-            abstract_code->GetCode().GetBaselinePCForBytecodeOffset(code_offset,
-                                                                    false));
+        baseline_iterator->AdvanceToBytecodeOffset(code_offset);
+        code_offset =
+            static_cast<int>(baseline_iterator->current_pc_start_offset());
       }
 
       if (inlining_id == SourcePosition::kNotInlined) {
@@ -216,6 +223,7 @@ void ProfilerListener::CodeCreateEvent(LogEventsAndTags tag,
   DispatchCodeEvent(evt_rec);
 }
 
+#if V8_ENABLE_WEBASSEMBLY
 void ProfilerListener::CodeCreateEvent(LogEventsAndTags tag,
                                        const wasm::WasmCode* code,
                                        wasm::WasmName name,
@@ -236,6 +244,7 @@ void ProfilerListener::CodeCreateEvent(LogEventsAndTags tag,
   rec->instruction_size = code->instructions().length();
   DispatchCodeEvent(evt_rec);
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 void ProfilerListener::CallbackEvent(Handle<Name> name, Address entry_point) {
   CodeEventsContainer evt_rec(CodeEventRecord::CODE_CREATION);

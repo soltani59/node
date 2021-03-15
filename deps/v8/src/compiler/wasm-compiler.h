@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#if !V8_ENABLE_WEBASSEMBLY
+#error This header should only be included if WebAssembly is enabled.
+#endif  // !V8_ENABLE_WEBASSEMBLY
+
 #ifndef V8_COMPILER_WASM_COMPILER_H_
 #define V8_COMPILER_WASM_COMPILER_H_
 
@@ -175,6 +179,17 @@ struct WasmInstanceCacheNodes {
   Node* mem_start;
   Node* mem_size;
   Node* mem_mask;
+};
+
+struct WasmLoopInfo {
+  Node* header;
+  uint32_t nesting_depth;
+  bool is_innermost;
+
+  WasmLoopInfo(Node* header, uint32_t nesting_depth, bool is_innermost)
+      : header(header),
+        nesting_depth(nesting_depth),
+        is_innermost(is_innermost) {}
 };
 
 // Abstracts details of building TurboFan graph nodes for wasm to separate
@@ -715,9 +730,6 @@ class WasmGraphBuilder {
   WasmInstanceCacheNodes* instance_cache_ = nullptr;
 
   SetOncePointer<Node> instance_node_;
-  SetOncePointer<Node> ref_null_node_;
-  SetOncePointer<Node> globals_start_;
-  SetOncePointer<Node> imported_mutable_globals_;
   SetOncePointer<Node> stack_check_code_node_;
   SetOncePointer<Node> isolate_root_node_;
   SetOncePointer<const Operator> stack_check_call_operator_;

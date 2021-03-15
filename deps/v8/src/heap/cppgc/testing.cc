@@ -19,8 +19,7 @@ OverrideEmbedderStackStateScope::OverrideEmbedderStackStateScope(
 }
 
 OverrideEmbedderStackStateScope::~OverrideEmbedderStackStateScope() {
-  auto& heap = internal::HeapBase::From(heap_handle_);
-  heap.override_stack_state_.reset();
+  internal::HeapBase::From(heap_handle_).override_stack_state_.reset();
 }
 
 }  // namespace testing

@@ -163,7 +163,8 @@
   'unicodelctest-no-optimization': [PASS, NO_VARIANTS],
 
   # Test is only enabled on ASAN. Takes too long on many other bots.
-  'regress/regress-crbug-9161': [PASS, SLOW, ['asan == False', SKIP]],
+  # Also disabled on Mac ASAN for https://crbug.com/v8/11437.
+  'regress/regress-crbug-9161': [PASS, SLOW, ['not asan or system == macos', SKIP]],
 
   # OOM with too many isolates/memory objects (https://crbug.com/1010272)
   # Predictable tests fail due to race between postMessage and GrowMemory
@@ -331,19 +332,8 @@
   'regress/asm/*': [SKIP],
   'regress/wasm/*': [SKIP],
 
+  'asm/*': [SKIP],
   'wasm/*': [SKIP],
-
-  'asm/asm-heap': [SKIP],
-  'asm/asm-validation': [SKIP],
-  'asm/call-stdlib': [SKIP],
-  'asm/call-annotation': [SKIP],
-  'asm/global-imports': [SKIP],
-  'asm/regress-1027595': [SKIP],
-  'asm/regress-1069173': [SKIP],
-  'asm/regress-913822': [SKIP],
-  'asm/regress-937650': [SKIP],
-  'asm/regress-9531': [SKIP],
-  'asm/return-types': [SKIP],
 
   # Tests tracing when generating wasm in TurboFan.
   'tools/compiler-trace-flags-wasm': [SKIP],
@@ -574,9 +564,6 @@
   # https://bugs.chromium.org/p/v8/issues/detail?id=7102
   # Flaky due to huge string allocation.
   'regress/regress-748069': [SKIP],
-
-  # https://bugs.chromium.org/p/v8/issues/detail?id=11438
-  'regress/regress-crbug-627935': [SKIP],
 }],  # 'msan == True'
 
 ##############################################################################
@@ -831,6 +818,31 @@
   # https://github.com/v8-riscv/v8/issues/418
   'regress/regress-1138075': [SKIP],
   'regress/regress-1138611': [SKIP],
+
+  # SIMD not be implemented
+  'regress/wasm/regress-1054466': [SKIP],
+  'regress/wasm/regress-1065599': [SKIP],
+  'regress/wasm/regress-1070078': [SKIP],
+  'regress/wasm/regress-1081030': [SKIP],
+  'regress/wasm/regress-10831': [SKIP],
+  'regress/wasm/regress-10309': [SKIP],
+  'regress/wasm/regress-1111522': [SKIP],
+  'regress/wasm/regress-1116019': [SKIP],
+  'regress/wasm/regress-1124885': [SKIP],
+  'regress/wasm/regress-1165966': [SKIP],
+  'regress/wasm/regress-1112124': [SKIP],
+  'regress/wasm/regress-1132461': [SKIP],
+  'regress/wasm/regress-1161555': [SKIP],
+  'regress/wasm/regress-1161954': [SKIP],
+  'regress/regress-1172797': [SKIP],
+  'regress/wasm/regress-1179025': [SKIP],
+  'wasm/simd-errors': [SKIP],
+  'wasm/simd-globals': [SKIP],
+  'wasm/multi-value-simd': [SKIP],
+  'wasm/simd-call': [SKIP],
+  'wasm/liftoff-simd-params': [SKIP],
+  'wasm/exceptions-simd': [SKIP],
+
 }],  # 'arch == riscv64'
 
 ['arch == riscv64 and variant == stress_incremental_marking', {

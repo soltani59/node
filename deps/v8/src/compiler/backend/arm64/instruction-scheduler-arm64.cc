@@ -152,6 +152,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kArm64F64x2Add:
     case kArm64F64x2Sub:
     case kArm64F64x2Mul:
+    case kArm64F64x2MulElement:
     case kArm64F64x2Div:
     case kArm64F64x2Min:
     case kArm64F64x2Max:
@@ -177,9 +178,9 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kArm64F32x4RecipApprox:
     case kArm64F32x4RecipSqrtApprox:
     case kArm64F32x4Add:
-    case kArm64F32x4AddHoriz:
     case kArm64F32x4Sub:
     case kArm64F32x4Mul:
+    case kArm64F32x4MulElement:
     case kArm64F32x4Div:
     case kArm64F32x4Min:
     case kArm64F32x4Max:
@@ -220,7 +221,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kArm64I32x4Shl:
     case kArm64I32x4ShrS:
     case kArm64I32x4Add:
-    case kArm64I32x4AddHoriz:
     case kArm64I32x4Sub:
     case kArm64I32x4Mul:
     case kArm64I32x4Mla:
@@ -252,7 +252,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kArm64I16x8SConvertI32x4:
     case kArm64I16x8Add:
     case kArm64I16x8AddSatS:
-    case kArm64I16x8AddHoriz:
     case kArm64I16x8Sub:
     case kArm64I16x8SubSatS:
     case kArm64I16x8Mul:
@@ -288,7 +287,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kArm64I8x16AddSatS:
     case kArm64I8x16Sub:
     case kArm64I8x16SubSatS:
-    case kArm64I8x16Mul:
     case kArm64I8x16Mla:
     case kArm64I8x16Mls:
     case kArm64I8x16MinS:
@@ -308,7 +306,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kArm64I8x16RoundingAverageU:
     case kArm64I8x16Abs:
     case kArm64I8x16BitMask:
-    case kArm64SignSelect:
     case kArm64S128Const:
     case kArm64S128Zero:
     case kArm64S128Dup:
@@ -347,10 +344,10 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kArm64S8x4Reverse:
     case kArm64S8x2Reverse:
     case kArm64V128AnyTrue:
-    case kArm64V64x2AllTrue:
-    case kArm64V32x4AllTrue:
-    case kArm64V16x8AllTrue:
-    case kArm64V8x16AllTrue:
+    case kArm64I64x2AllTrue:
+    case kArm64I32x4AllTrue:
+    case kArm64I16x8AllTrue:
+    case kArm64I8x16AllTrue:
     case kArm64TestAndBranch32:
     case kArm64TestAndBranch:
     case kArm64CompareAndBranch32:

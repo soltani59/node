@@ -78,7 +78,7 @@ class MakeGarbageCollectedTraitBase
       static_assert(std::is_base_of<CustomSpaceBase, CustomSpace>::value,
                     "Custom space must inherit from CustomSpaceBase.");
       return internal::MakeGarbageCollectedTraitInternal::Allocate(
-          handle, size, internal::GCInfoTrait<T>::Index(),
+          handle, size, internal::GCInfoTrait<U>::Index(),
           CustomSpace::kSpaceIndex);
     }
   };
@@ -88,7 +88,7 @@ class MakeGarbageCollectedTraitBase
     static void* Allocate(AllocationHandle& handle, size_t size) {
       // Default space.
       return internal::MakeGarbageCollectedTraitInternal::Allocate(
-          handle, size, internal::GCInfoTrait<T>::Index());
+          handle, size, internal::GCInfoTrait<U>::Index());
     }
   };
 
@@ -102,8 +102,10 @@ class MakeGarbageCollectedTraitBase
    * \returns the memory to construct an object of type T on.
    */
   static void* Allocate(AllocationHandle& handle, size_t size) {
-    return SpacePolicy<T, typename SpaceTrait<T>::Space>::Allocate(handle,
-                                                                   size);
+    return SpacePolicy<
+        typename internal::GCInfoFolding<
+            T, typename T::ParentMostGarbageCollectedType>::ResultType,
+        typename SpaceTrait<T>::Space>::Allocate(handle, size);
   }
 
   /**

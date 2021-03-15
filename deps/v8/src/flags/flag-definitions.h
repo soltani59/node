@@ -163,7 +163,7 @@ struct MaybeBoolFlag {
 #define ENABLE_CONTROL_FLOW_INTEGRITY_BOOL false
 #endif
 
-#if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64
+#if V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64
 #define ENABLE_SPARKPLUG true
 #else
 // TODO(v8:11421): Enable Sparkplug for other architectures
@@ -270,7 +270,6 @@ DEFINE_IMPLICATION(harmony_weak_refs_with_cleanup_some, harmony_weak_refs)
 #define HARMONY_STAGED_BASE(V)                                              \
   V(harmony_top_level_await, "harmony top level await")                     \
   V(harmony_relative_indexing_methods, "harmony relative indexing methods") \
-  V(harmony_private_brand_checks, "harmony private brand checks")           \
   V(harmony_class_static_blocks, "harmony static initializer blocks")
 
 #ifdef V8_INTL_SUPPORT
@@ -287,10 +286,8 @@ DEFINE_IMPLICATION(harmony_weak_refs_with_cleanup_some, harmony_weak_refs)
   V(harmony_sharedarraybuffer, "harmony sharedarraybuffer")           \
   V(harmony_atomics, "harmony atomics")                               \
   V(harmony_weak_refs, "harmony weak references")                     \
-  V(harmony_string_replaceall, "harmony String.prototype.replaceAll") \
-  V(harmony_logical_assignment, "harmony logical assignment")         \
-  V(harmony_atomics_waitasync, "harmony Atomics.waitAsync")           \
-  V(harmony_regexp_match_indices, "harmony regexp match indices")
+  V(harmony_regexp_match_indices, "harmony regexp match indices")     \
+  V(harmony_private_brand_checks, "harmony private brand checks")
 
 #ifdef V8_INTL_SUPPORT
 #define HARMONY_SHIPPING(V) HARMONY_SHIPPING_BASE(V)
@@ -520,9 +517,9 @@ DEFINE_BOOL(use_ic, true, "use inline caching")
 DEFINE_INT(budget_for_feedback_vector_allocation, 940,
            "The budget in amount of bytecode executed by a function before we "
            "decide to allocate feedback vectors")
-DEFINE_INT(scale_factor_for_feedback_allocation, 4,
+DEFINE_INT(scale_factor_for_feedback_allocation, 12,
            "scale bytecode size for feedback vector allocation.")
-DEFINE_BOOL(feedback_allocation_on_bytecode_size, false,
+DEFINE_BOOL(feedback_allocation_on_bytecode_size, true,
             "Instead of a fixed budget for lazy feedback vector allocation, "
             "scale it based in the bytecode size.")
 DEFINE_IMPLICATION(sparkplug, feedback_allocation_on_bytecode_size)
@@ -584,7 +581,7 @@ DEFINE_BOOL(
     turboprop_as_toptier, false,
     "enable experimental turboprop compiler without further tierup to turbofan")
 DEFINE_IMPLICATION(turboprop_as_toptier, turboprop)
-DEFINE_VALUE_IMPLICATION(turboprop, interrupt_budget, 14 * KB)
+DEFINE_VALUE_IMPLICATION(turboprop, interrupt_budget, 20 * KB)
 DEFINE_VALUE_IMPLICATION(turboprop, reuse_opt_code_count, 2)
 DEFINE_UINT_READONLY(max_minimorphic_map_checks, 4,
                      "max number of map checks to perform in minimorphic state")
@@ -933,9 +930,8 @@ DEFINE_BOOL(wasm_stack_checks, true,
 DEFINE_BOOL(wasm_math_intrinsics, true,
             "intrinsify some Math imports into wasm")
 
-DEFINE_BOOL(wasm_loop_unrolling, false,
-            "generate and then remove loop exits in wasm turbofan code "
-            "(placeholder for future loop unrolling feature)")
+DEFINE_BOOL(wasm_loop_unrolling, true,
+            "enable loop unrolling for wasm functions (experimental)")
 DEFINE_BOOL(wasm_trap_handler, true,
             "use signal handlers to catch out of bounds memory access in wasm"
             " (currently Linux x86_64 only)")
@@ -1201,6 +1197,9 @@ DEFINE_BOOL(fast_promotion_new_space, false,
             "fast promote new space on high survival rates")
 
 DEFINE_BOOL(clear_free_memory, false, "initialize free memory with 0")
+
+DEFINE_BOOL(crash_on_aborted_evacuation, false,
+            "crash when evacuation of page fails")
 
 DEFINE_BOOL_READONLY(
     young_generation_large_objects, true,

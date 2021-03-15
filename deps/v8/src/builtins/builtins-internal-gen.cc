@@ -312,6 +312,9 @@ TF_BUILTIN(RecordWrite, RecordWriteCodeStubAssembler) {
   Label incremental_wb(this);
   Label exit(this);
 
+  // In this method we limit the allocatable registers so we have to use
+  // UncheckedParameter. Parameter does not work because the checked cast needs
+  // more registers.
   auto remembered_set = UncheckedParameter<Smi>(Descriptor::kRememberedSet);
   Branch(ShouldEmitRememberSet(remembered_set), &generational_wb,
          &incremental_wb);
@@ -333,8 +336,7 @@ TF_BUILTIN(RecordWrite, RecordWriteCodeStubAssembler) {
     BIND(&test_old_to_young_flags);
     {
       // TODO(ishell): do a new-space range check instead.
-      TNode<IntPtrT> value =
-          BitcastTaggedToWord(Load(MachineType::TaggedPointer(), slot));
+      TNode<IntPtrT> value = BitcastTaggedToWord(Load<HeapObject>(slot));
 
       // TODO(albertnetymk): Try to cache the page flag for value and object,
       // instead of calling IsPageFlagSet each time.
@@ -343,7 +345,7 @@ TF_BUILTIN(RecordWrite, RecordWriteCodeStubAssembler) {
       GotoIfNot(value_is_young, &incremental_wb);
 
       TNode<IntPtrT> object =
-          BitcastTaggedToWord(UntypedParameter(Descriptor::kObject));
+          BitcastTaggedToWord(UncheckedParameter<Object>(Descriptor::kObject));
       TNode<BoolT> object_is_young =
           IsPageFlagSet(object, MemoryChunk::kIsInYoungGenerationMask);
       Branch(object_is_young, &incremental_wb, &store_buffer_incremental_wb);
@@ -353,7 +355,7 @@ TF_BUILTIN(RecordWrite, RecordWriteCodeStubAssembler) {
     {
       auto fp_mode = UncheckedParameter<Smi>(Descriptor::kFPMode);
       TNode<IntPtrT> object =
-          BitcastTaggedToWord(UntypedParameter(Descriptor::kObject));
+          BitcastTaggedToWord(UncheckedParameter<Object>(Descriptor::kObject));
       InsertIntoRememberedSetAndGoto(object, slot, fp_mode, &exit);
     }
 
@@ -361,7 +363,7 @@ TF_BUILTIN(RecordWrite, RecordWriteCodeStubAssembler) {
     {
       auto fp_mode = UncheckedParameter<Smi>(Descriptor::kFPMode);
       TNode<IntPtrT> object =
-          BitcastTaggedToWord(UntypedParameter(Descriptor::kObject));
+          BitcastTaggedToWord(UncheckedParameter<Object>(Descriptor::kObject));
       InsertIntoRememberedSetAndGoto(object, slot, fp_mode, &incremental_wb);
     }
   }
@@ -371,8 +373,7 @@ TF_BUILTIN(RecordWrite, RecordWriteCodeStubAssembler) {
     Label call_incremental_wb(this);
 
     auto slot = UncheckedParameter<IntPtrT>(Descriptor::kSlot);
-    TNode<IntPtrT> value =
-        BitcastTaggedToWord(Load(MachineType::TaggedPointer(), slot));
+    TNode<IntPtrT> value = BitcastTaggedToWord(Load<HeapObject>(slot));
 
     // There are two cases we need to call incremental write barrier.
     // 1) value_is_white
@@ -384,7 +385,7 @@ TF_BUILTIN(RecordWrite, RecordWriteCodeStubAssembler) {
               &exit);
 
     TNode<IntPtrT> object =
-        BitcastTaggedToWord(UntypedParameter(Descriptor::kObject));
+        BitcastTaggedToWord(UncheckedParameter<Object>(Descriptor::kObject));
     Branch(
         IsPageFlagSet(object, MemoryChunk::kSkipEvacuationSlotsRecordingMask),
         &exit, &call_incremental_wb);
@@ -395,7 +396,7 @@ TF_BUILTIN(RecordWrite, RecordWriteCodeStubAssembler) {
           ExternalReference::write_barrier_marking_from_code_function());
       auto fp_mode = UncheckedParameter<Smi>(Descriptor::kFPMode);
       TNode<IntPtrT> object =
-          BitcastTaggedToWord(UntypedParameter(Descriptor::kObject));
+          BitcastTaggedToWord(UncheckedParameter<Object>(Descriptor::kObject));
       CallCFunction2WithCallerSavedRegistersMode<Int32T, IntPtrT, IntPtrT>(
           function, object, slot, fp_mode, &exit);
     }
@@ -413,9 +414,12 @@ TF_BUILTIN(EphemeronKeyBarrier, RecordWriteCodeStubAssembler) {
       ExternalReference::ephemeron_key_write_barrier_function());
   TNode<ExternalReference> isolate_constant =
       ExternalConstant(ExternalReference::isolate_address(isolate()));
+  // In this method we limit the allocatable registers so we have to use
+  // UncheckedParameter. Parameter does not work because the checked cast needs
+  // more registers.
   auto address = UncheckedParameter<IntPtrT>(Descriptor::kSlotAddress);
   TNode<IntPtrT> object =
-      BitcastTaggedToWord(UntypedParameter(Descriptor::kObject));
+      BitcastTaggedToWord(UncheckedParameter<Object>(Descriptor::kObject));
   TNode<Smi> fp_mode = UncheckedParameter<Smi>(Descriptor::kFPMode);
   CallCFunction3WithCallerSavedRegistersMode<Int32T, IntPtrT, IntPtrT,
                                              ExternalReference>(
@@ -488,7 +492,7 @@ TF_BUILTIN(DeleteProperty, DeletePropertyBaseAssembler) {
       if_notfound(this), slow(this), if_proxy(this);
 
   if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-    // TODO(v8:11167) remove once OrderedNameDictionary supported.
+    // TODO(v8:11167) remove once SwissNameDictionary supported.
     GotoIf(Int32TrueConstant(), &slow);
   }
 
@@ -926,7 +930,7 @@ void Builtins::Generate_MemMove(MacroAssembler* masm) {
 
 // TODO(v8:11421): Remove #if once baseline compiler is ported to other
 // architectures.
-#if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64
+#if V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64
 void Builtins::Generate_BaselineLeaveFrame(MacroAssembler* masm) {
   EmitReturnBaseline(masm);
 }
@@ -957,7 +961,7 @@ TF_BUILTIN(GetProperty, CodeStubAssembler) {
       if_slow(this, Label::kDeferred);
 
   if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-    // TODO(v8:11167) remove once OrderedNameDictionary supported.
+    // TODO(v8:11167) remove once SwissNameDictionary supported.
     GotoIf(Int32TrueConstant(), &if_slow);
   }
 
@@ -1017,7 +1021,7 @@ TF_BUILTIN(GetPropertyWithReceiver, CodeStubAssembler) {
       if_slow(this, Label::kDeferred);
 
   if (V8_DICT_MODE_PROTOTYPES_BOOL) {
-    // TODO(v8:11167) remove once OrderedNameDictionary supported.
+    // TODO(v8:11167) remove once SwissNameDictionary supported.
     GotoIf(Int32TrueConstant(), &if_slow);
   }
 

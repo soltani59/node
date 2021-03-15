@@ -17,12 +17,11 @@ namespace detail {
 
 // Avoid using kScratchRegister(==r10) since the macro-assembler doesn't use
 // this scope and will conflict.
-static constexpr Register kScratchRegisters[] = {r8, r9, r11, r12, r14, r15};
+static constexpr Register kScratchRegisters[] = {r8, r9, r11, r12, r15};
 static constexpr int kNumScratchRegisters = arraysize(kScratchRegisters);
 
 }  // namespace detail
 
-// TODO(v8:11429): Move BaselineAssembler to baseline-assembler-<arch>-inl.h
 class BaselineAssembler::ScratchRegisterScope {
  public:
   explicit ScratchRegisterScope(BaselineAssembler* assembler)

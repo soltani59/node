@@ -10,6 +10,7 @@
 #include "src/base/utils/random-number-generator.h"
 #include "src/codegen/callable.h"
 #include "src/codegen/code-factory.h"
+#include "src/codegen/cpu-features.h"
 #include "src/codegen/external-reference-table.h"
 #include "src/codegen/macro-assembler.h"
 #include "src/codegen/register-configuration.h"
@@ -287,7 +288,7 @@ void TurboAssembler::DecompressTaggedPointer(Register destination,
                                              Operand field_operand) {
   RecordComment("[ DecompressTaggedPointer");
   movl(destination, field_operand);
-  addq(destination, kRootRegister);
+  addq(destination, kPointerCageBaseRegister);
   RecordComment("]");
 }
 
@@ -295,7 +296,7 @@ void TurboAssembler::DecompressTaggedPointer(Register destination,
                                              Register source) {
   RecordComment("[ DecompressTaggedPointer");
   movl(destination, source);
-  addq(destination, kRootRegister);
+  addq(destination, kPointerCageBaseRegister);
   RecordComment("]");
 }
 
@@ -303,7 +304,7 @@ void TurboAssembler::DecompressAnyTagged(Register destination,
                                          Operand field_operand) {
   RecordComment("[ DecompressAnyTagged");
   movl(destination, field_operand);
-  addq(destination, kRootRegister);
+  addq(destination, kPointerCageBaseRegister);
   RecordComment("]");
 }
 
@@ -2347,6 +2348,7 @@ void TurboAssembler::I8x16Popcnt(XMMRegister dst, XMMRegister src,
                                  XMMRegister tmp) {
   DCHECK_NE(dst, tmp);
   DCHECK_NE(src, tmp);
+  DCHECK_NE(kScratchDoubleReg, tmp);
   if (CpuFeatures::IsSupported(AVX)) {
     CpuFeatureScope avx_scope(this, AVX);
     vmovdqa(tmp, ExternalReferenceAsOperand(
@@ -2405,6 +2407,10 @@ void TurboAssembler::F64x2ConvertLowI32x4U(XMMRegister dst, XMMRegister src) {
   // dst = [ src_low, 0x43300000, src_high, 0x4330000 ];
   // 0x43300000'00000000 is a special double where the significand bits
   // precisely represents all uint32 numbers.
+  if (!CpuFeatures::IsSupported(AVX) && dst != src) {
+    movaps(dst, src);
+    src = dst;
+  }
   Unpcklps(dst, src,
            ExternalReferenceAsOperand(
                ExternalReference::
@@ -2514,17 +2520,18 @@ void TurboAssembler::I64x2GtS(XMMRegister dst, XMMRegister src0,
     DCHECK_EQ(dst, src0);
     pcmpgtq(dst, src1);
   } else {
+    CpuFeatureScope sse_scope(this, SSE3);
     DCHECK_NE(dst, src0);
     DCHECK_NE(dst, src1);
-    movdqa(dst, src1);
-    movdqa(kScratchDoubleReg, src0);
+    movaps(dst, src1);
+    movaps(kScratchDoubleReg, src0);
     psubq(dst, src0);
     pcmpeqd(kScratchDoubleReg, src1);
-    pand(dst, kScratchDoubleReg);
-    movdqa(kScratchDoubleReg, src0);
+    andps(dst, kScratchDoubleReg);
+    movaps(kScratchDoubleReg, src0);
     pcmpgtd(kScratchDoubleReg, src1);
-    por(dst, kScratchDoubleReg);
-    pshufd(dst, dst, 0xF5);
+    orps(dst, kScratchDoubleReg);
+    movshdup(dst, dst);
   }
 }
 
@@ -2539,25 +2546,26 @@ void TurboAssembler::I64x2GeS(XMMRegister dst, XMMRegister src0,
     CpuFeatureScope sse_scope(this, SSE4_2);
     DCHECK_NE(dst, src0);
     if (dst != src1) {
-      movdqa(dst, src1);
+      movaps(dst, src1);
     }
     pcmpgtq(dst, src0);
     pcmpeqd(kScratchDoubleReg, kScratchDoubleReg);
-    pxor(dst, kScratchDoubleReg);
+    xorps(dst, kScratchDoubleReg);
   } else {
+    CpuFeatureScope sse_scope(this, SSE3);
     DCHECK_NE(dst, src0);
     DCHECK_NE(dst, src1);
-    movdqa(dst, src0);
-    movdqa(kScratchDoubleReg, src1);
+    movaps(dst, src0);
+    movaps(kScratchDoubleReg, src1);
     psubq(dst, src1);
     pcmpeqd(kScratchDoubleReg, src0);
-    pand(dst, kScratchDoubleReg);
-    movdqa(kScratchDoubleReg, src1);
+    andps(dst, kScratchDoubleReg);
+    movaps(kScratchDoubleReg, src1);
     pcmpgtd(kScratchDoubleReg, src0);
-    por(dst, kScratchDoubleReg);
-    pshufd(dst, dst, 0xF5);
+    orps(dst, kScratchDoubleReg);
+    movshdup(dst, dst);
     pcmpeqd(kScratchDoubleReg, kScratchDoubleReg);
-    pxor(dst, kScratchDoubleReg);
+    xorps(dst, kScratchDoubleReg);
   }
 }
 
@@ -2586,16 +2594,41 @@ void TurboAssembler::I16x8ExtAddPairwiseI8x16S(XMMRegister dst,
 
 void TurboAssembler::I32x4ExtAddPairwiseI16x8U(XMMRegister dst,
                                                XMMRegister src) {
-  // src = |a|b|c|d|e|f|g|h|
-  // kScratchDoubleReg = i32x4.splat(0x0000FFFF)
-  Pcmpeqd(kScratchDoubleReg, kScratchDoubleReg);
-  Psrld(kScratchDoubleReg, byte{16});
-  // kScratchDoubleReg =|0|b|0|d|0|f|0|h|
-  Pand(kScratchDoubleReg, src);
-  // dst = |0|a|0|c|0|e|0|g|
-  Psrld(dst, src, byte{16});
-  // dst = |a+b|c+d|e+f|g+h|
-  Paddd(dst, kScratchDoubleReg);
+  if (CpuFeatures::IsSupported(AVX)) {
+    CpuFeatureScope avx_scope(this, AVX);
+    // src = |a|b|c|d|e|f|g|h| (low)
+    // dst = |0|a|0|c|0|e|0|g|
+    vpsrld(dst, src, 16);
+    // scratch = |0|b|0|d|0|f|0|h|
+    vpblendw(kScratchDoubleReg, src, dst, 0xAA);
+    // dst = |a+b|c+d|e+f|g+h|
+    vpaddd(dst, dst, kScratchDoubleReg);
+  } else if (CpuFeatures::IsSupported(SSE4_1)) {
+    CpuFeatureScope sse_scope(this, SSE4_1);
+    // There is a potentially better lowering if we get rip-relative constants,
+    // see https://github.com/WebAssembly/simd/pull/380.
+    movaps(kScratchDoubleReg, src);
+    psrld(kScratchDoubleReg, 16);
+    if (dst != src) {
+      movaps(dst, src);
+    }
+    pblendw(dst, kScratchDoubleReg, 0xAA);
+    paddd(dst, kScratchDoubleReg);
+  } else {
+    // src = |a|b|c|d|e|f|g|h|
+    // kScratchDoubleReg = i32x4.splat(0x0000FFFF)
+    pcmpeqd(kScratchDoubleReg, kScratchDoubleReg);
+    psrld(kScratchDoubleReg, byte{16});
+    // kScratchDoubleReg =|0|b|0|d|0|f|0|h|
+    pand(kScratchDoubleReg, src);
+    // dst = |0|a|0|c|0|e|0|g|
+    if (dst != src) {
+      movaps(dst, src);
+    }
+    psrld(dst, byte{16});
+    // dst = |a+b|c+d|e+f|g+h|
+    paddd(dst, kScratchDoubleReg);
+  }
 }
 
 void TurboAssembler::I8x16Swizzle(XMMRegister dst, XMMRegister src,
@@ -2610,7 +2643,7 @@ void TurboAssembler::I8x16Swizzle(XMMRegister dst, XMMRegister src,
     vpshufb(dst, src, kScratchDoubleReg);
   } else {
     CpuFeatureScope sse_scope(this, SSSE3);
-    movdqa(kScratchDoubleReg, op);
+    movaps(kScratchDoubleReg, op);
     if (dst != src) {
       movaps(dst, src);
     }
@@ -2808,12 +2841,6 @@ void TurboAssembler::Popcntq(Register dst, Operand src) {
   }
   UNREACHABLE();
 }
-
-// Order general registers are pushed by Pushad:
-// rax, rcx, rdx, rbx, rsi, rdi, r8, r9, r11, r14, r15.
-const int
-    MacroAssembler::kSafepointPushRegisterIndices[Register::kNumRegisters] = {
-        0, 1, 2, 3, -1, -1, 4, 5, 6, 7, -1, 8, 9, -1, 10, 11};
 
 void MacroAssembler::PushStackHandler() {
   // Adjust this code if not the case.
@@ -3356,7 +3383,7 @@ void TurboAssembler::AllocateStackSpace(int bytes) {
 }
 #endif
 
-void MacroAssembler::EnterExitFramePrologue(bool save_rax,
+void MacroAssembler::EnterExitFramePrologue(Register saved_rax_reg,
                                             StackFrame::Type frame_type) {
   DCHECK(frame_type == StackFrame::EXIT ||
          frame_type == StackFrame::BUILTIN_EXIT);
@@ -3376,8 +3403,8 @@ void MacroAssembler::EnterExitFramePrologue(bool save_rax,
   Push(Immediate(0));  // Saved entry sp, patched before call.
 
   // Save the frame pointer and the context in top.
-  if (save_rax) {
-    movq(r14, rax);  // Backup rax in callee-save register.
+  if (saved_rax_reg != no_reg) {
+    movq(saved_rax_reg, rax);  // Backup rax in callee-save register.
   }
 
   Store(
@@ -3426,18 +3453,19 @@ void MacroAssembler::EnterExitFrameEpilogue(int arg_stack_space,
 
 void MacroAssembler::EnterExitFrame(int arg_stack_space, bool save_doubles,
                                     StackFrame::Type frame_type) {
-  EnterExitFramePrologue(true, frame_type);
+  Register saved_rax_reg = r12;
+  EnterExitFramePrologue(saved_rax_reg, frame_type);
 
   // Set up argv in callee-saved register r15. It is reused in LeaveExitFrame,
   // so it must be retained across the C-call.
   int offset = StandardFrameConstants::kCallerSPOffset - kSystemPointerSize;
-  leaq(r15, Operand(rbp, r14, times_system_pointer_size, offset));
+  leaq(r15, Operand(rbp, saved_rax_reg, times_system_pointer_size, offset));
 
   EnterExitFrameEpilogue(arg_stack_space, save_doubles);
 }
 
 void MacroAssembler::EnterApiExitFrame(int arg_stack_space) {
-  EnterExitFramePrologue(false, StackFrame::EXIT);
+  EnterExitFramePrologue(no_reg, StackFrame::EXIT);
   EnterExitFrameEpilogue(arg_stack_space, false);
 }
 
@@ -3502,7 +3530,7 @@ static const int kRegisterPassedArguments = 4;
 static const int kRegisterPassedArguments = 6;
 #endif
 
-void MacroAssembler::LoadNativeContextSlot(int index, Register dst) {
+void MacroAssembler::LoadNativeContextSlot(Register dst, int index) {
   // Load native context.
   LoadMap(dst, rsi);
   LoadTaggedPointerField(

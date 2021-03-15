@@ -20,7 +20,10 @@
 #include "src/objects/js-function-inl.h"
 #include "src/objects/oddball.h"
 #include "src/snapshot/embedded/embedded-data.h"
+
+#if V8_ENABLE_WEBASSEMBLY
 #include "src/wasm/wasm-linkage.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 namespace v8 {
 
@@ -659,11 +662,10 @@ Builtins::Name Deoptimizer::GetDeoptimizationEntry(DeoptimizeKind kind) {
 
 bool Deoptimizer::IsDeoptimizationEntry(Isolate* isolate, Address addr,
                                         DeoptimizeKind* type_out) {
-  Code maybe_code = InstructionStream::TryLookupCode(isolate, addr);
-  if (maybe_code.is_null()) return false;
+  Builtins::Name builtin = InstructionStream::TryLookupCode(isolate, addr);
+  if (!Builtins::IsBuiltinId(builtin)) return false;
 
-  Code code = maybe_code;
-  switch (code.builtin_index()) {
+  switch (builtin) {
     case Builtins::kDeoptimizationEntry_Eager:
       *type_out = DeoptimizeKind::kEager;
       return true;
@@ -937,7 +939,9 @@ void Deoptimizer::DoComputeOutputFrames() {
         DoComputeConstructStubFrame(translated_frame, frame_index);
         break;
       case TranslatedFrame::kBuiltinContinuation:
+#if V8_ENABLE_WEBASSEMBLY
       case TranslatedFrame::kJSToWasmBuiltinContinuation:
+#endif  // V8_ENABLE_WEBASSEMBLY
         DoComputeBuiltinContinuation(translated_frame, frame_index,
                                      BuiltinContinuationMode::STUB);
         break;
@@ -962,6 +966,10 @@ void Deoptimizer::DoComputeOutputFrames() {
   FrameDescription* topmost = output_[count - 1];
   topmost->GetRegisterValues()->SetRegister(kRootRegister.code(),
                                             isolate()->isolate_root());
+#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+  topmost->GetRegisterValues()->SetRegister(kPointerCageBaseRegister.code(),
+                                            isolate()->isolate_root());
+#endif
 
   // Print some helpful diagnostic information.
   if (verbose_tracing_enabled()) {
@@ -1038,8 +1046,10 @@ void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
 
   // Compute the incoming parameter translation.
   ReadOnlyRoots roots(isolate());
-  if (should_pad_arguments && ShouldPadArguments(parameters_count)) {
-    frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
+  if (should_pad_arguments) {
+    for (int i = 0; i < ArgumentPaddingSlots(parameters_count); ++i) {
+      frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
+    }
   }
 
   // Note: parameters_count includes the receiver.
@@ -1191,7 +1201,7 @@ void Deoptimizer::DoComputeUnoptimizedFrame(TranslatedFrame* translated_frame,
 
   // Translate the accumulator register (depending on frame position).
   if (is_topmost) {
-    if (kPadArguments) {
+    for (int i = 0; i < ArgumentPaddingSlots(1); ++i) {
       frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
     }
     // For topmost frame, put the accumulator on the stack. The
@@ -1295,11 +1305,10 @@ void Deoptimizer::DoComputeArgumentsAdaptorFrame(
       argument_count_without_receiver - formal_parameter_count;
   // The number of pushed arguments is the maximum of the actual argument count
   // and the formal parameter count + the receiver.
-  const bool should_pad_args = ShouldPadArguments(
+  const int padding = ArgumentPaddingSlots(
       std::max(argument_count_without_receiver, formal_parameter_count) + 1);
   const int output_frame_size =
-      std::max(0, extra_argument_count * kSystemPointerSize) +
-      (should_pad_args ? kSystemPointerSize : 0);
+      (std::max(0, extra_argument_count) + padding) * kSystemPointerSize;
   if (verbose_tracing_enabled()) {
     PrintF(trace_scope_->file(),
            "  translating arguments adaptor => variable_size=%d\n",
@@ -1322,7 +1331,7 @@ void Deoptimizer::DoComputeArgumentsAdaptorFrame(
   FrameWriter frame_writer(this, output_frame, verbose_trace_scope());
 
   ReadOnlyRoots roots(isolate());
-  if (should_pad_args) {
+  for (int i = 0; i < padding; ++i) {
     frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
   }
 
@@ -1384,7 +1393,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslatedFrame* translated_frame,
   output_frame->SetTop(top_address);
 
   ReadOnlyRoots roots(isolate());
-  if (ShouldPadArguments(parameters_count)) {
+  for (int i = 0; i < ArgumentPaddingSlots(parameters_count); ++i) {
     frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
   }
 
@@ -1450,7 +1459,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslatedFrame* translated_frame,
   frame_writer.PushTranslatedValue(receiver_iterator, debug_hint);
 
   if (is_topmost) {
-    if (kPadArguments) {
+    for (int i = 0; i < ArgumentPaddingSlots(1); ++i) {
       frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
     }
     // Ensure the result is restored back when we return to the stub.
@@ -1557,10 +1566,11 @@ Builtins::Name Deoptimizer::TrampolineForBuiltinContinuation(
   UNREACHABLE();
 }
 
-TranslatedValue Deoptimizer::TranslatedValueForWasmReturnType(
-    base::Optional<wasm::ValueKind> wasm_call_return_type) {
-  if (wasm_call_return_type) {
-    switch (wasm_call_return_type.value()) {
+#if V8_ENABLE_WEBASSEMBLY
+TranslatedValue Deoptimizer::TranslatedValueForWasmReturnKind(
+    base::Optional<wasm::ValueKind> wasm_call_return_kind) {
+  if (wasm_call_return_kind) {
+    switch (wasm_call_return_kind.value()) {
       case wasm::kI32:
         return TranslatedValue::NewInt32(
             &translated_state_,
@@ -1586,6 +1596,7 @@ TranslatedValue Deoptimizer::TranslatedValueForWasmReturnType(
   return TranslatedValue::NewTagged(&translated_state_,
                                     ReadOnlyRoots(isolate()).undefined_value());
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 // BuiltinContinuationFrames capture the machine state that is expected as input
 // to a builtin, including both input register values and stack parameters. When
@@ -1650,7 +1661,9 @@ void Deoptimizer::DoComputeBuiltinContinuation(
     BuiltinContinuationMode mode) {
   TranslatedFrame::iterator result_iterator = translated_frame->end();
 
-  bool is_js_to_wasm_builtin_continuation =
+  bool is_js_to_wasm_builtin_continuation = false;
+#if V8_ENABLE_WEBASSEMBLY
+  is_js_to_wasm_builtin_continuation =
       translated_frame->kind() == TranslatedFrame::kJSToWasmBuiltinContinuation;
   if (is_js_to_wasm_builtin_continuation) {
     // For JSToWasmBuiltinContinuations, add a TranslatedValue with the result
@@ -1658,10 +1671,11 @@ void Deoptimizer::DoComputeBuiltinContinuation(
     // This TranslatedValue will be written in the output frame in place of the
     // hole and we'll use ContinueToCodeStubBuiltin in place of
     // ContinueToCodeStubBuiltinWithResult.
-    TranslatedValue result = TranslatedValueForWasmReturnType(
-        translated_frame->wasm_call_return_type());
+    TranslatedValue result = TranslatedValueForWasmReturnKind(
+        translated_frame->wasm_call_return_kind());
     translated_frame->Add(result);
   }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
   TranslatedFrame::iterator value_iterator = translated_frame->begin();
 
@@ -1734,7 +1748,8 @@ void Deoptimizer::DoComputeBuiltinContinuation(
   ++value_iterator;
 
   ReadOnlyRoots roots(isolate());
-  if (ShouldPadArguments(frame_info.stack_parameter_count())) {
+  const int padding = ArgumentPaddingSlots(frame_info.stack_parameter_count());
+  for (int i = 0; i < padding; ++i) {
     frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
   }
 
@@ -1889,7 +1904,7 @@ void Deoptimizer::DoComputeBuiltinContinuation(
   }
 
   if (is_topmost) {
-    if (kPadArguments) {
+    for (int i = 0; i < ArgumentPaddingSlots(1); ++i) {
       frame_writer.PushRawObject(roots.the_hole_value(), "padding\n");
     }
 

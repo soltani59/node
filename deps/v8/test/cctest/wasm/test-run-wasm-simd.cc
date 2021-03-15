@@ -368,6 +368,26 @@ bool ExpectFused(TestExecutionTier tier) {
   void RunWasm_##name##_Impl(LowerSimd lower_simd,                        \
                              TestExecutionTier execution_tier)
 
+// Use this for post-mvp instructions, for which we only implement interpreter
+// and TurboFan support. Liftoff support is generally not implemented yet, so
+// don't test that, and neither is scalar lowering.
+#define WASM_SIMD_TEST_POST_MVP(name)                                     \
+  void RunWasm_##name##_Impl(LowerSimd lower_simd,                        \
+                             TestExecutionTier execution_tier);           \
+  TEST(RunWasm_##name##_turbofan) {                                       \
+    if (!CpuFeatures::SupportsWasmSimd128()) return;                      \
+    EXPERIMENTAL_FLAG_SCOPE(simd);                                        \
+    FLAG_SCOPE(wasm_simd_post_mvp);                                       \
+    RunWasm_##name##_Impl(kNoLowerSimd, TestExecutionTier::kTurbofan);    \
+  }                                                                       \
+  TEST(RunWasm_##name##_interpreter) {                                    \
+    EXPERIMENTAL_FLAG_SCOPE(simd);                                        \
+    FLAG_SCOPE(wasm_simd_post_mvp);                                       \
+    RunWasm_##name##_Impl(kNoLowerSimd, TestExecutionTier::kInterpreter); \
+  }                                                                       \
+  void RunWasm_##name##_Impl(LowerSimd lower_simd,                        \
+                             TestExecutionTier execution_tier)
+
 // Returns true if the platform can represent the result.
 template <typename T>
 bool PlatformCanRepresent(T x) {
@@ -607,14 +627,12 @@ WASM_SIMD_TEST(F32x4Sqrt) {
   RunF32x4UnOpTest(execution_tier, lower_simd, kExprF32x4Sqrt, std::sqrt);
 }
 
-WASM_SIMD_TEST(F32x4RecipApprox) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
+WASM_SIMD_TEST_POST_MVP(F32x4RecipApprox) {
   RunF32x4UnOpTest(execution_tier, lower_simd, kExprF32x4RecipApprox,
                    base::Recip, false /* !exact */);
 }
 
-WASM_SIMD_TEST(F32x4RecipSqrtApprox) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
+WASM_SIMD_TEST_POST_MVP(F32x4RecipSqrtApprox) {
   RunF32x4UnOpTest(execution_tier, lower_simd, kExprF32x4RecipSqrtApprox,
                    base::RecipSqrt, false /* !exact */);
 }
@@ -766,66 +784,8 @@ WASM_SIMD_TEST(F32x4Le) {
   RunF32x4CompareOpTest(execution_tier, lower_simd, kExprF32x4Le, LessEqual);
 }
 
-#if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_ARM64 || \
-    V8_TARGET_ARCH_ARM
-// TODO(v8:10983) Prototyping sign select.
-template <typename T>
-void RunSignSelect(TestExecutionTier execution_tier, LowerSimd lower_simd,
-                   WasmOpcode signselect, WasmOpcode splat,
-                   std::array<int8_t, kSimd128Size> mask) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
-  WasmRunner<int32_t, T, T> r(execution_tier, lower_simd);
-  T* output = r.builder().template AddGlobal<T>(kWasmS128);
-
-  // Splat 2 constant values, then use a mask that selects alternate lanes.
-  BUILD(r, WASM_LOCAL_GET(0), WASM_SIMD_OP(splat), WASM_LOCAL_GET(1),
-        WASM_SIMD_OP(splat), WASM_SIMD_CONSTANT(mask), WASM_SIMD_OP(signselect),
-        kExprGlobalSet, 0, WASM_ONE);
-
-  r.Call(1, 2);
-
-  constexpr int lanes = kSimd128Size / sizeof(T);
-  for (int i = 0; i < lanes; i += 2) {
-    CHECK_EQ(1, ReadLittleEndianValue<T>(&output[i]));
-  }
-  for (int i = 1; i < lanes; i += 2) {
-    CHECK_EQ(2, ReadLittleEndianValue<T>(&output[i]));
-  }
-}
-
-WASM_SIMD_TEST_NO_LOWERING(I8x16SignSelect) {
-  std::array<int8_t, kSimd128Size> mask = {0x80, 0, -1, 0, 0x80, 0, -1, 0,
-                                           0x80, 0, -1, 0, 0x80, 0, -1, 0};
-  RunSignSelect<int8_t>(execution_tier, lower_simd, kExprI8x16SignSelect,
-                        kExprI8x16Splat, mask);
-}
-
-WASM_SIMD_TEST_NO_LOWERING(I16x8SignSelect) {
-  std::array<int8_t, kSimd128Size> mask = {0, 0x80, 0, 0, -1, -1, 0, 0,
-                                           0, 0x80, 0, 0, -1, -1, 0, 0};
-  RunSignSelect<int16_t>(execution_tier, lower_simd, kExprI16x8SignSelect,
-                         kExprI16x8Splat, mask);
-}
-
-WASM_SIMD_TEST_NO_LOWERING(I32x4SignSelect) {
-  std::array<int8_t, kSimd128Size> mask = {0,  0,  0,  0x80, 0, 0, 0, 0,
-                                           -1, -1, -1, -1,   0, 0, 0, 0};
-  RunSignSelect<int32_t>(execution_tier, lower_simd, kExprI32x4SignSelect,
-                         kExprI32x4Splat, mask);
-}
-
-WASM_SIMD_TEST_NO_LOWERING(I64x2SignSelect) {
-  std::array<int8_t, kSimd128Size> mask = {0, 0, 0, 0, 0, 0, 0, 0x80,
-                                           0, 0, 0, 0, 0, 0, 0, 0};
-  RunSignSelect<int64_t>(execution_tier, lower_simd, kExprI64x2SignSelect,
-                         kExprI64x2Splat, mask);
-}
-#endif  // V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_ARM64 ||
-        // V8_TARGET_ARCH_ARM
-
 #if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_S390X
-WASM_SIMD_TEST_NO_LOWERING(F32x4Qfma) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
+WASM_SIMD_TEST_POST_MVP(F32x4Qfma) {
   WasmRunner<int32_t, float, float, float> r(execution_tier, lower_simd);
   // Set up global to hold mask output.
   float* g = r.builder().AddGlobal<float>(kWasmS128);
@@ -849,8 +809,7 @@ WASM_SIMD_TEST_NO_LOWERING(F32x4Qfma) {
   }
 }
 
-WASM_SIMD_TEST_NO_LOWERING(F32x4Qfms) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
+WASM_SIMD_TEST_POST_MVP(F32x4Qfms) {
   WasmRunner<int32_t, float, float, float> r(execution_tier, lower_simd);
   // Set up global to hold mask output.
   float* g = r.builder().AddGlobal<float>(kWasmS128);
@@ -1550,8 +1509,7 @@ WASM_SIMD_TEST(I64x2Mul) {
 }
 
 #if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_S390X
-WASM_SIMD_TEST_NO_LOWERING(F64x2Qfma) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
+WASM_SIMD_TEST_POST_MVP(F64x2Qfma) {
   WasmRunner<int32_t, double, double, double> r(execution_tier, lower_simd);
   // Set up global to hold mask output.
   double* g = r.builder().AddGlobal<double>(kWasmS128);
@@ -1575,8 +1533,7 @@ WASM_SIMD_TEST_NO_LOWERING(F64x2Qfma) {
   }
 }
 
-WASM_SIMD_TEST_NO_LOWERING(F64x2Qfms) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
+WASM_SIMD_TEST_POST_MVP(F64x2Qfms) {
   WasmRunner<int32_t, double, double, double> r(execution_tier, lower_simd);
   // Set up global to hold mask output.
   double* g = r.builder().AddGlobal<double>(kWasmS128);
@@ -2820,12 +2777,6 @@ WASM_SIMD_TEST(I8x16LeU) {
                     UnsignedLessEqual);
 }
 
-WASM_SIMD_TEST(I8x16Mul) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
-  RunI8x16BinOpTest(execution_tier, lower_simd, kExprI8x16Mul,
-                    base::MulWithWraparound);
-}
-
 WASM_SIMD_TEST(I8x16RoundingAverageU) {
   RunI8x16BinOpTest<uint8_t>(execution_tier, lower_simd,
                              kExprI8x16RoundingAverageU,
@@ -2988,27 +2939,6 @@ void RunBinaryLaneOpTest(
   for (size_t i = 0; i < expected.size(); i++) {
     CHECK_EQ(ReadLittleEndianValue<T>(&src0[i]), expected[i]);
   }
-}
-
-WASM_SIMD_TEST(I32x4AddHoriz) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
-  // Inputs are [0 1 2 3] and [4 5 6 7].
-  RunBinaryLaneOpTest<int32_t>(execution_tier, lower_simd, kExprI32x4AddHoriz,
-                               {{1, 5, 9, 13}});
-}
-
-WASM_SIMD_TEST(I16x8AddHoriz) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
-  // Inputs are [0 1 2 3 4 5 6 7] and [8 9 10 11 12 13 14 15].
-  RunBinaryLaneOpTest<int16_t>(execution_tier, lower_simd, kExprI16x8AddHoriz,
-                               {{1, 5, 9, 13, 17, 21, 25, 29}});
-}
-
-WASM_SIMD_TEST(F32x4AddHoriz) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
-  // Inputs are [0.0f 1.0f 2.0f 3.0f] and [4.0f 5.0f 6.0f 7.0f].
-  RunBinaryLaneOpTest<float>(execution_tier, lower_simd, kExprF32x4AddHoriz,
-                             {{1.0f, 5.0f, 9.0f, 13.0f}});
 }
 
 // Test shuffle ops.
@@ -3370,7 +3300,6 @@ WASM_SIMD_TEST(S8x16MultiShuffleFuzz) {
 // test inputs. Test inputs with all true, all false, one true, and one false.
 #define WASM_SIMD_BOOL_REDUCTION_TEST(format, lanes, int_type)                 \
   WASM_SIMD_TEST(ReductionTest##lanes) {                                       \
-    FLAG_SCOPE(wasm_simd_post_mvp);                                            \
     WasmRunner<int32_t> r(execution_tier, lower_simd);                         \
     if (lanes == 2 && lower_simd == kLowerSimd) return;                        \
     byte zero = r.AllocateLocal(kWasmS128);                                    \
@@ -3392,14 +3321,14 @@ WASM_SIMD_TEST(S8x16MultiShuffleFuzz) {
           WASM_IF(WASM_I32_NE(WASM_LOCAL_GET(reduced), WASM_ZERO),             \
                   WASM_RETURN1(WASM_ZERO)),                                    \
           WASM_LOCAL_SET(                                                      \
-              reduced, WASM_SIMD_UNOP(kExprV##format##AllTrue,                 \
+              reduced, WASM_SIMD_UNOP(kExprI##format##AllTrue,                 \
                                       WASM_SIMD_BINOP(kExprI##format##Eq,      \
                                                       WASM_LOCAL_GET(zero),    \
                                                       WASM_LOCAL_GET(zero)))), \
           WASM_IF(WASM_I32_EQ(WASM_LOCAL_GET(reduced), WASM_ZERO),             \
                   WASM_RETURN1(WASM_ZERO)),                                    \
           WASM_LOCAL_SET(                                                      \
-              reduced, WASM_SIMD_UNOP(kExprV##format##AllTrue,                 \
+              reduced, WASM_SIMD_UNOP(kExprI##format##AllTrue,                 \
                                       WASM_SIMD_BINOP(kExprI##format##Ne,      \
                                                       WASM_LOCAL_GET(zero),    \
                                                       WASM_LOCAL_GET(zero)))), \
@@ -3423,14 +3352,14 @@ WASM_SIMD_TEST(S8x16MultiShuffleFuzz) {
           WASM_IF(WASM_I32_EQ(WASM_LOCAL_GET(reduced), WASM_ZERO),             \
                   WASM_RETURN1(WASM_ZERO)),                                    \
           WASM_LOCAL_SET(                                                      \
-              reduced, WASM_SIMD_UNOP(kExprV##format##AllTrue,                 \
+              reduced, WASM_SIMD_UNOP(kExprI##format##AllTrue,                 \
                                       WASM_SIMD_BINOP(kExprI##format##Eq,      \
                                                       WASM_LOCAL_GET(one_one), \
                                                       WASM_LOCAL_GET(zero)))), \
           WASM_IF(WASM_I32_NE(WASM_LOCAL_GET(reduced), WASM_ZERO),             \
                   WASM_RETURN1(WASM_ZERO)),                                    \
           WASM_LOCAL_SET(                                                      \
-              reduced, WASM_SIMD_UNOP(kExprV##format##AllTrue,                 \
+              reduced, WASM_SIMD_UNOP(kExprI##format##AllTrue,                 \
                                       WASM_SIMD_BINOP(kExprI##format##Ne,      \
                                                       WASM_LOCAL_GET(one_one), \
                                                       WASM_LOCAL_GET(zero)))), \
@@ -3700,9 +3629,7 @@ WASM_SIMD_TEST(SimdF32x4SetGlobal) {
 
 #if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_IA32
 // TODO(v8:11168): Prototyping prefetch.
-WASM_SIMD_TEST(SimdPrefetch) {
-  FLAG_SCOPE(wasm_simd_post_mvp);
-
+WASM_SIMD_TEST_POST_MVP(SimdPrefetch) {
   {
     // Test PrefetchT.
     WasmRunner<int32_t> r(execution_tier, lower_simd);
@@ -4296,7 +4223,6 @@ WASM_SIMD_TEST_NO_LOWERING(S128Store64Lane) {
 
 #define WASM_SIMD_ANYTRUE_TEST(format, lanes, max, param_type)                \
   WASM_SIMD_TEST(S##format##AnyTrue) {                                        \
-    FLAG_SCOPE(wasm_simd_post_mvp);                                           \
     WasmRunner<int32_t, param_type> r(execution_tier, lower_simd);            \
     if (lanes == 2 && lower_simd == kLowerSimd) return;                       \
     byte simd = r.AllocateLocal(kWasmS128);                                   \
@@ -4325,15 +4251,14 @@ WASM_SIMD_TEST(V128AnytrueWithNegativeZero) {
 }
 
 #define WASM_SIMD_ALLTRUE_TEST(format, lanes, max, param_type)                \
-  WASM_SIMD_TEST(V##format##AllTrue) {                                        \
-    FLAG_SCOPE(wasm_simd_post_mvp);                                           \
+  WASM_SIMD_TEST(I##format##AllTrue) {                                        \
     WasmRunner<int32_t, param_type> r(execution_tier, lower_simd);            \
     if (lanes == 2 && lower_simd == kLowerSimd) return;                       \
     byte simd = r.AllocateLocal(kWasmS128);                                   \
     BUILD(                                                                    \
         r,                                                                    \
         WASM_LOCAL_SET(simd, WASM_SIMD_I##format##_SPLAT(WASM_LOCAL_GET(0))), \
-        WASM_SIMD_UNOP(kExprV##format##AllTrue, WASM_LOCAL_GET(simd)));       \
+        WASM_SIMD_UNOP(kExprI##format##AllTrue, WASM_LOCAL_GET(simd)));       \
     CHECK_EQ(1, r.Call(max));                                                 \
     CHECK_EQ(1, r.Call(0x1));                                                 \
     CHECK_EQ(0, r.Call(0));                                                   \

@@ -50,7 +50,7 @@ class JSReceiver : public HeapObject {
 
   // Gets slow properties for non-global objects (if v8_dict_mode_prototypes is
   // set).
-  DECL_GETTER(property_dictionary_ordered, OrderedNameDictionary)
+  DECL_GETTER(property_dictionary_swiss, SwissNameDictionary)
 
   // Sets the properties backing store and makes sure any existing hash is moved
   // to the new properties store. To clear out the properties store, pass in the
@@ -745,7 +745,8 @@ class JSObject : public TorqueGeneratedJSObject<JSObject, JSReceiver> {
 
   // Maximal number of elements (numbered 0 .. kMaxElementCount - 1).
   // Also maximal value of JSArray's length property.
-  static const uint32_t kMaxElementCount = 0xffffffffu;
+  static constexpr uint32_t kMaxElementCount = kMaxUInt32;
+  static constexpr uint32_t kMaxElementIndex = kMaxElementCount - 1;
 
   // Constants for heuristics controlling conversion of fast elements
   // to slow elements.
@@ -1116,6 +1117,9 @@ class JSMessageObject : public JSObject {
   // Returns the offset of the given position within the containing line.
   // EnsureSourcePositionsAvailable must have been called before calling this.
   V8_EXPORT_PRIVATE int GetColumnNumber() const;
+
+  // Returns the source code
+  V8_EXPORT_PRIVATE String GetSource() const;
 
   // Returns the source code line containing the given source
   // position, or the empty string if the position is invalid.

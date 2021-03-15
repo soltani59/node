@@ -198,6 +198,8 @@ static constexpr unsigned CpuFeaturesFromCompiler() {
 #endif
 }
 
+bool CpuFeatures::SupportsWasmSimd128() { return IsSupported(NEON); }
+
 void CpuFeatures::ProbeImpl(bool cross_compile) {
   dcache_line_size_ = 64;
 
@@ -4245,6 +4247,15 @@ void Assembler::vorr(QwNeonRegister dst, QwNeonRegister src1,
   // Instruction details available in ARM DDI 0406C.b, A8.8.976.
   DCHECK(IsEnabled(NEON));
   emit(EncodeNeonBinaryBitwiseOp(VORR, NEON_Q, dst.code(), src1.code(),
+                                 src2.code()));
+}
+
+void Assembler::vorn(QwNeonRegister dst, QwNeonRegister src1,
+                     QwNeonRegister src2) {
+  // Qd = vorn(Qn, Qm) SIMD OR NOT.
+  // Instruction details available in ARM DDI 0406C.d, A8.8.359.
+  DCHECK(IsEnabled(NEON));
+  emit(EncodeNeonBinaryBitwiseOp(VORN, NEON_Q, dst.code(), src1.code(),
                                  src2.code()));
 }
 

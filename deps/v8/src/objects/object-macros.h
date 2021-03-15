@@ -219,14 +219,14 @@
     return holder::name(isolate, tag);                                        \
   }                                                                           \
   type holder::name(IsolateRoot isolate, RelaxedLoadTag) const {              \
-    type value = TaggedField<type, offset>::load(isolate, *this);             \
+    type value = TaggedField<type, offset>::Relaxed_Load(isolate, *this);     \
     DCHECK(get_condition);                                                    \
     return value;                                                             \
   }                                                                           \
   void holder::set_##name(type value, RelaxedStoreTag,                        \
                           WriteBarrierMode mode) {                            \
     DCHECK(set_condition);                                                    \
-    TaggedField<type, offset>::store(*this, value);                           \
+    TaggedField<type, offset>::Relaxed_Store(*this, value);                   \
     CONDITIONAL_WRITE_BARRIER(*this, offset, value, mode);                    \
   }
 
@@ -349,6 +349,19 @@
   bool holder::name() const { return BooleanBit::get(field(), offset); } \
   void holder::set_##name(bool value) {                                  \
     set_##field(BooleanBit::set(field(), offset, value));                \
+  }
+
+#define DECL_RELAXED_BOOL_ACCESSORS(name) \
+  inline bool name(RelaxedLoadTag) const; \
+  inline void set_##name(bool value, RelaxedStoreTag);
+
+#define RELAXED_BOOL_ACCESSORS(holder, field, name, offset)          \
+  bool holder::name(RelaxedLoadTag) const {                          \
+    return BooleanBit::get(field(kRelaxedLoad), offset);             \
+  }                                                                  \
+  void holder::set_##name(bool value, RelaxedStoreTag) {             \
+    set_##field(BooleanBit::set(field(kRelaxedLoad), offset, value), \
+                kRelaxedStore);                                      \
   }
 
 #define BIT_FIELD_ACCESSORS(holder, field, name, BitField)      \
@@ -553,7 +566,23 @@
 #define RELAXED_WRITE_INT32_FIELD(p, offset, value)             \
   base::Relaxed_Store(                                          \
       reinterpret_cast<base::Atomic32*>(FIELD_ADDR(p, offset)), \
-      static_cast<base::Atomic32>(value));
+      static_cast<base::Atomic32>(value))
+
+static_assert(sizeof(int) == sizeof(int32_t),
+              "sizeof int must match sizeof int32_t");
+
+#define RELAXED_READ_INT_FIELD(p, offset) RELAXED_READ_INT32_FIELD(p, offset)
+
+#define RELAXED_WRITE_INT_FIELD(p, offset, value) \
+  RELAXED_WRITE_INT32_FIELD(p, offset, value)
+
+static_assert(sizeof(unsigned) == sizeof(uint32_t),
+              "sizeof unsigned must match sizeof uint32_t");
+
+#define RELAXED_READ_UINT_FIELD(p, offset) RELAXED_READ_UINT32_FIELD(p, offset)
+
+#define RELAXED_WRITE_UINT_FIELD(p, offset, value) \
+  RELAXED_WRITE_UINT32_FIELD(p, offset, value)
 
 #define RELAXED_READ_BYTE_FIELD(p, offset) \
   static_cast<byte>(base::Relaxed_Load(    \

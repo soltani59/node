@@ -135,6 +135,8 @@ enum class PrimitiveType { kBoolean, kNumber, kString, kSymbol };
     EmptyPropertyDictionary)                                                 \
   V(EmptyOrderedPropertyDictionary, empty_ordered_property_dictionary,       \
     EmptyOrderedPropertyDictionary)                                          \
+  V(EmptySwissPropertyDictionary, empty_swiss_property_dictionary,           \
+    EmptySwissPropertyDictionary)                                            \
   V(EmptySlowElementDictionary, empty_slow_element_dictionary,               \
     EmptySlowElementDictionary)                                              \
   V(empty_string, empty_string, EmptyString)                                 \
@@ -305,7 +307,6 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
     : public compiler::CodeAssembler,
       public TorqueGeneratedExportedMacrosAssembler {
  public:
-  using Node = compiler::Node;
   using ScopedExceptionHandler = compiler::ScopedExceptionHandler;
 
   template <typename T>
@@ -569,7 +570,7 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
   // Smi conversions.
   TNode<Float64T> SmiToFloat64(TNode<Smi> value);
   TNode<Smi> SmiFromIntPtr(TNode<IntPtrT> value) { return SmiTag(value); }
-  TNode<Smi> SmiFromInt32(SloppyTNode<Int32T> value);
+  TNode<Smi> SmiFromInt32(TNode<Int32T> value);
   TNode<Smi> SmiFromUint32(TNode<Uint32T> value);
   TNode<IntPtrT> SmiToIntPtr(TNode<Smi> value) { return SmiUntag(value); }
   TNode<Int32T> SmiToInt32(TNode<Smi> value);
@@ -778,20 +779,20 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
   template <class... TArgs>
   TNode<Object> Call(TNode<Context> context, TNode<Object> callable,
                      TNode<JSReceiver> receiver, TArgs... args) {
-    return UncheckedCast<Object>(CallJS(
+    return CallJS(
         CodeFactory::Call(isolate(), ConvertReceiverMode::kNotNullOrUndefined),
-        context, callable, receiver, args...));
+        context, callable, receiver, args...);
   }
   template <class... TArgs>
   TNode<Object> Call(TNode<Context> context, TNode<Object> callable,
                      TNode<Object> receiver, TArgs... args) {
     if (IsUndefinedConstant(receiver) || IsNullConstant(receiver)) {
-      return UncheckedCast<Object>(CallJS(
+      return CallJS(
           CodeFactory::Call(isolate(), ConvertReceiverMode::kNullOrUndefined),
-          context, callable, receiver, args...));
+          context, callable, receiver, args...);
     }
-    return UncheckedCast<Object>(CallJS(CodeFactory::Call(isolate()), context,
-                                        callable, receiver, args...));
+    return CallJS(CodeFactory::Call(isolate()), context, callable, receiver,
+                  args...);
   }
 
   TNode<Object> CallApiCallback(TNode<Object> context, TNode<RawPtrT> callback,
@@ -1272,7 +1273,7 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
                                                TNode<Int32T> instance_type,
                                                Label* bailout);
   // Load the identity hash of a JSRececiver.
-  TNode<IntPtrT> LoadJSReceiverIdentityHash(TNode<Object> receiver,
+  TNode<IntPtrT> LoadJSReceiverIdentityHash(TNode<JSReceiver> receiver,
                                             Label* if_no_hash = nullptr);
 
   // This is only used on a newly allocated PropertyArray which
@@ -1695,7 +1696,7 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
   // Allocate a HeapNumber without initializing its value.
   TNode<HeapNumber> AllocateHeapNumber();
   // Allocate a HeapNumber with a specific value.
-  TNode<HeapNumber> AllocateHeapNumberWithValue(SloppyTNode<Float64T> value);
+  TNode<HeapNumber> AllocateHeapNumberWithValue(TNode<Float64T> value);
   TNode<HeapNumber> AllocateHeapNumberWithValue(double value) {
     return AllocateHeapNumberWithValue(Float64Constant(value));
   }
@@ -2023,10 +2024,6 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
     return UncheckedCast<FixedDoubleArray>(base);
   }
 
-  TNode<Int32T> ConvertElementsKindToInt(TNode<Int32T> elements_kind) {
-    return UncheckedCast<Int32T>(elements_kind);
-  }
-
   template <typename T>
   bool ClassHasMapConstant() {
     return false;
@@ -2242,8 +2239,8 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
                        Label* if_smi);
   TNode<Number> ChangeFloat32ToTagged(TNode<Float32T> value);
   TNode<Number> ChangeFloat64ToTagged(TNode<Float64T> value);
-  TNode<Number> ChangeInt32ToTagged(SloppyTNode<Int32T> value);
-  TNode<Number> ChangeUint32ToTagged(SloppyTNode<Uint32T> value);
+  TNode<Number> ChangeInt32ToTagged(TNode<Int32T> value);
+  TNode<Number> ChangeUint32ToTagged(TNode<Uint32T> value);
   TNode<Number> ChangeUintPtrToTagged(TNode<UintPtrT> value);
   TNode<Uint32T> ChangeNumberToUint32(TNode<Number> value);
   TNode<Float64T> ChangeNumberToFloat64(TNode<Number> value);
@@ -2430,6 +2427,7 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
   TNode<BoolT> IsStringInstanceType(TNode<Int32T> instance_type);
   TNode<BoolT> IsString(TNode<HeapObject> object);
   TNode<BoolT> IsSeqOneByteString(TNode<HeapObject> object);
+  TNode<BoolT> IsSwissNameDictionary(TNode<HeapObject> object);
 
   TNode<BoolT> IsSymbolInstanceType(TNode<Int32T> instance_type);
   TNode<BoolT> IsInternalizedStringInstanceType(TNode<Int32T> instance_type);
@@ -3044,6 +3042,9 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
                                       TNode<IntPtrT> name_index,
                                       TVariable<Uint32T>* var_details,
                                       TVariable<Object>* var_value);
+  void LoadPropertyFromSwissNameDictionary(
+      TNode<SwissNameDictionary> dictionary, TNode<IntPtrT> name_index,
+      TVariable<Uint32T>* var_details, TVariable<Object>* var_value);
   void LoadPropertyFromGlobalDictionary(TNode<GlobalDictionary> dictionary,
                                         TNode<IntPtrT> name_index,
                                         TVariable<Uint32T>* var_details,
@@ -3179,7 +3180,7 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
   // Report that there was a feedback update, performing any tasks that should
   // be done after a feedback update.
   void ReportFeedbackUpdate(TNode<FeedbackVector> feedback_vector,
-                            SloppyTNode<UintPtrT> slot_id, const char* reason);
+                            TNode<UintPtrT> slot_id, const char* reason);
 
   // Combine the new feedback with the existing_feedback. Do nothing if
   // existing_feedback is nullptr.
@@ -3203,10 +3204,6 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
   TNode<Uint8T> Int32ToUint8Clamped(TNode<Int32T> int32_value);
   TNode<Uint8T> Float64ToUint8Clamped(TNode<Float64T> float64_value);
 
-  Node* PrepareValueForWriteToTypedArray(TNode<Object> input,
-                                         ElementsKind elements_kind,
-                                         TNode<Context> context);
-
   template <typename T>
   TNode<T> PrepareValueForWriteToTypedArray(TNode<Object> input,
                                             ElementsKind elements_kind,
@@ -3216,9 +3213,9 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
   // TODO(turbofan): For BIGINT64_ELEMENTS and BIGUINT64_ELEMENTS
   // we pass {value} as BigInt object instead of int64_t. We should
   // teach TurboFan to handle int64_t on 32-bit platforms eventually.
-  template <typename TIndex>
+  template <typename TIndex, typename TValue>
   void StoreElement(TNode<RawPtrT> elements, ElementsKind kind,
-                    TNode<TIndex> index, Node* value);
+                    TNode<TIndex> index, TNode<TValue> value);
 
   // Implements the BigInt part of
   // https://tc39.github.io/proposal-bigint/#sec-numbertorawbytes,
@@ -3487,10 +3484,15 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
   TNode<Code> LoadBuiltin(TNode<Smi> builtin_id);
 
   // Figure out the SFI's code object using its data field.
+  // If |data_type_out| is provided, the instance type of the function data will
+  // be stored in it. In case the code object is a builtin (data is a Smi),
+  // data_type_out will be set to 0.
   // If |if_compile_lazy| is provided then the execution will go to the given
   // label in case of an CompileLazy code object.
-  TNode<Code> GetSharedFunctionInfoCode(TNode<SharedFunctionInfo> shared_info,
-                                        Label* if_compile_lazy = nullptr);
+  TNode<Code> GetSharedFunctionInfoCode(
+      TNode<SharedFunctionInfo> shared_info,
+      TVariable<Uint16T>* data_type_out = nullptr,
+      Label* if_compile_lazy = nullptr);
 
   TNode<JSFunction> AllocateFunctionWithMapAndContext(
       TNode<Map> map, TNode<SharedFunctionInfo> shared_info,
@@ -3701,6 +3703,11 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
     return IntPtrConstant(FeedbackIterator::kHandlerOffset);
   }
 
+  TNode<SwissNameDictionary> AllocateSwissNameDictionary(
+      TNode<IntPtrT> at_least_space_for);
+  TNode<SwissNameDictionary> AllocateSwissNameDictionary(
+      int at_least_space_for);
+
  private:
   friend class CodeStubArguments;
 
@@ -3799,15 +3806,23 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
       TNode<Object> value, WriteBarrierMode barrier_mode = UPDATE_WRITE_BARRIER,
       int additional_offset = 0);
 
+  template <typename TIndex>
+  void StoreElementTypedArrayBigInt(TNode<RawPtrT> elements, ElementsKind kind,
+                                    TNode<TIndex> index, TNode<BigInt> value);
+
+  template <typename TIndex>
+  void StoreElementTypedArrayWord32(TNode<RawPtrT> elements, ElementsKind kind,
+                                    TNode<TIndex> index, TNode<Word32T> value);
+
   // Store value to an elements array with given elements kind.
   // TODO(turbofan): For BIGINT64_ELEMENTS and BIGUINT64_ELEMENTS
   // we pass {value} as BigInt object instead of int64_t. We should
   // teach TurboFan to handle int64_t on 32-bit platforms eventually.
   // TODO(solanes): This method can go away and simplify into only one version
   // of StoreElement once we have "if constexpr" available to use.
-  template <typename TArray, typename TIndex>
+  template <typename TArray, typename TIndex, typename TValue>
   void StoreElementTypedArray(TNode<TArray> elements, ElementsKind kind,
-                              TNode<TIndex> index, Node* value);
+                              TNode<TIndex> index, TNode<TValue> value);
 
   template <typename TIndex>
   void StoreElement(TNode<FixedArrayBase> elements, ElementsKind kind,
@@ -3823,12 +3838,23 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
   void TryPlainPrimitiveNonNumberToNumber(TNode<HeapObject> input,
                                           TVariable<Number>* var_result,
                                           Label* if_bailout);
+
+  template <typename TValue>
+  void EmitElementStoreTypedArray(TNode<JSTypedArray> typed_array,
+                                  TNode<IntPtrT> key, TNode<Object> value,
+                                  ElementsKind elements_kind,
+                                  KeyedAccessStoreMode store_mode,
+                                  Label* bailout, TNode<Context> context,
+                                  TVariable<Object>* maybe_converted_value);
+
+  template <typename TValue>
+  void EmitElementStoreTypedArrayUpdateValue(
+      TNode<Object> value, ElementsKind elements_kind,
+      TNode<TValue> converted_value, TVariable<Object>* maybe_converted_value);
 };
 
 class V8_EXPORT_PRIVATE CodeStubArguments {
  public:
-  using Node = compiler::Node;
-
   // |argc| specifies the number of arguments passed to the builtin excluding
   // the receiver. The arguments include the receiver.
   CodeStubArguments(CodeStubAssembler* assembler, TNode<IntPtrT> argc)
